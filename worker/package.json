@@ -1,0 +1,20 @@
+{
+  "name": "mcp-odds-api-worker",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker that serves the odds-api pack over MCP Streamable HTTP",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cfworker/json-schema": "^4.1.1",
+    "@modelcontextprotocol/sdk": "^1.32.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261011.1",
+    "typescript": "^5.9.3",
+    "wrangler": "^4.149.0"
+  }
+}

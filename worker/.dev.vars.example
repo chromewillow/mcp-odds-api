@@ -1,0 +1,3 @@
+# Copy to .dev.vars for `npm run dev`. Never commit .dev.vars.
+ODDS_API_KEY=your-odds-api-key
+MCP_AUTH_TOKEN=pick-a-long-random-string

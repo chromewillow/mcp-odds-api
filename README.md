@@ -118,6 +118,58 @@ It speaks MCP over stdin/stdout and answers `initialize`/`tools/list`/`tools/cal
 for **only** this pack's tools — none of the shared meta-tools the gateway
 connection above adds. Same source, same tools, no ask_pipeworx routing.
 
+## Self-host on Cloudflare Workers
+
+`worker/` serves this pack's tools over MCP Streamable HTTP from your own
+Cloudflare account, so any remote MCP client can connect to a URL. It is
+stateless (no Durable Objects or KV), fits the Workers free plan, and imports
+`src/index.ts` unchanged. GitHub Pages cannot host it: Pages serves static
+files only, and an MCP server has to run code to call The Odds API.
+
+**Deploy from GitHub Actions.** Add these repository secrets (Settings → Secrets
+and variables → Actions), then run the **Deploy to Cloudflare Workers** workflow,
+or push to `main`:
+
+| Secret | |
+| --- | --- |
+| `CLOUDFLARE_API_TOKEN` | required — create one from the *Edit Cloudflare Workers* template |
+| `CLOUDFLARE_ACCOUNT_ID` | required — on the Workers & Pages overview page |
+| `ODDS_API_KEY` | optional — your key from https://the-odds-api.com |
+| `MCP_AUTH_TOKEN` | optional — a long random string clients must send. Set it whenever `ODDS_API_KEY` is set, or anyone with the URL spends your credits |
+
+**Or deploy from your machine:**
+
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler deploy
+npx wrangler secret put ODDS_API_KEY
+npx wrangler secret put MCP_AUTH_TOKEN
+```
+
+The endpoint is `https://mcp-odds-api.<your-subdomain>.workers.dev/mcp`, and
+`/health` lists the tools and whether a key and auth are configured. Connect
+with a bearer token:
+
+```json
+{
+  "mcpServers": {
+    "odds-api": {
+      "url": "https://mcp-odds-api.<your-subdomain>.workers.dev/mcp",
+      "headers": { "Authorization": "Bearer <MCP_AUTH_TOKEN>" }
+    }
+  }
+}
+```
+
+For a client that cannot set headers, put the token in the URL instead:
+`.../mcp?token=<MCP_AUTH_TOKEN>`. A caller can also bring their own Odds API key
+with `?_apiKey=<key>`, which takes precedence over the Worker's `ODDS_API_KEY`.
+
+For local development, copy `worker/.dev.vars.example` to `worker/.dev.vars`
+and run `npm run dev` in `worker/`.
+
 ## Using with ask_pipeworx
 
 Instead of calling tools directly, you can ask questions in plain English —

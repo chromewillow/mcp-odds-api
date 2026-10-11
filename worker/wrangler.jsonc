@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mcp-odds-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "observability": { "enabled": true }
+  // Secrets are not stored here. Set them with:
+  //   npx wrangler secret put ODDS_API_KEY
+  //   npx wrangler secret put MCP_AUTH_TOKEN
+}

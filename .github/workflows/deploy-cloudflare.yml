@@ -1,0 +1,101 @@
+name: Deploy to Cloudflare Workers
+
+# Deploys worker/ (the odds-api pack served over MCP Streamable HTTP) to
+# https://mcp-odds-api.<your-subdomain>.workers.dev/mcp
+#
+# Repository secrets (Settings → Secrets and variables → Actions):
+#   CLOUDFLARE_API_TOKEN   required — token with the "Edit Cloudflare Workers" template
+#   CLOUDFLARE_ACCOUNT_ID  required — shown on the Workers & Pages overview page
+#   ODDS_API_KEY           optional — your key from https://the-odds-api.com
+#   MCP_AUTH_TOKEN         optional — bearer token clients must send; set it if ODDS_API_KEY is set
+#
+# The two optional secrets are pushed to the Worker only when they are non-empty,
+# so a secret set by hand with `wrangler secret put` is never overwritten by a blank.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/index.ts'
+      - 'package.json'
+      - 'worker/**'
+      - '.github/workflows/deploy-cloudflare.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-cloudflare
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Check Cloudflare credentials
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=""
+          [ -n "$CLOUDFLARE_API_TOKEN" ] || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ -n "$CLOUDFLARE_ACCOUNT_ID" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          if [ -n "$missing" ]; then
+            echo "::error::Missing repository secret(s):$missing. Add them under Settings → Secrets and variables → Actions, then re-run this workflow."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}
+          MCP_AUTH_TOKEN: ${{ secrets.MCP_AUTH_TOKEN }}
+        run: |
+          set -euo pipefail
+          secrets_file="$RUNNER_TEMP/worker-secrets.json"
+          trap 'rm -f "$secrets_file"' EXIT
+          node -e '
+            const out = {};
+            for (const k of ["ODDS_API_KEY", "MCP_AUTH_TOKEN"]) if (process.env[k]) out[k] = process.env[k];
+            require("fs").writeFileSync(process.argv[1], JSON.stringify(out), { mode: 0o600 });
+            console.log("secrets to upload:", Object.keys(out).join(", ") || "(none)");
+          ' "$secrets_file"
+          npx wrangler deploy --secrets-file "$secrets_file" | tee "$RUNNER_TEMP/deploy.log"
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1 || true)
+          if [ -n "$url" ]; then
+            echo "### Deployed :rocket:" >> "$GITHUB_STEP_SUMMARY"
+            echo "MCP endpoint: \`$url/mcp\`" >> "$GITHUB_STEP_SUMMARY"
+            echo "Health check: $url/health" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Smoke test
+        run: |
+          set -euo pipefail
+          url=$(grep -oE 'https://[a-zA-Z0-9.-]+\.workers\.dev' "$RUNNER_TEMP/deploy.log" | head -1 || true)
+          if [ -z "$url" ]; then
+            echo "::notice::No workers.dev URL in the deploy output (custom domain or workers.dev disabled); skipping smoke test."
+            exit 0
+          fi
+          for i in 1 2 3 4 5; do
+            if curl -fsS "$url/health"; then exit 0; fi
+            sleep 5
+          done
+          echo "::error::$url/health did not answer after deploy"
+          exit 1
